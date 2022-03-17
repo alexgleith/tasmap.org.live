@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="">
+  <head>
+    <meta charset="utf-8">
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"/> <!--320-->
+    <title>TasMap.org</title>
+
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <!-- Place favicon.ico in the root directory -->
+
+    <link rel="stylesheet" href="styles/vendor.css">
+
+    <link rel="stylesheet" href="styles/main.css">
+    
+  </head>
+  <body>
+    <!--[if lt IE 10]>
+      <p class="browserupgrade">You are using an <strong>outdated</strong> browser. Please <a href="http://browsehappy.com/">upgrade your browser</a> to improve your experience.</p>
+    <![endif]-->
+    <div class="navbar navbar-inverse navbar-fixed-top" role="navigation">
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <div class="navbar-icon-container">
+            <a href="#" class="navbar-icon pull-right visible-xs" style="color:#ffffff" id="nav-btn"><i class="fa fa-bars fa-lg white"></i></a>
+            <a href="#" class="navbar-icon pull-right visible-xs" style="color:#ffffff"  id="sidebar-toggle-btn"><i class="fa fa-list fa-lg white"></i></a>
+            <a href="/" class="navbar-icon pull-right visible-xs" style="color:#ffffff"><i class="fa fa-refresh fa-lg white"></i></a>
+          </div>
+          <a class="navbar-brand" href="#">TasMap.org</a>
+        </div>
+        <div class="navbar-collapse collapse">
+          <form class="navbar-form navbar-right" role="search">
+            <div class="form-group has-feedback">
+                <input id="searchbox" type="text" placeholder="Search" class="form-control">
+                <span id="searchicon" class="fa fa-search form-control-feedback white"></span>
+            </div>
+          </form>
+          <ul class="nav navbar-nav">
+            <li><a href="#" data-toggle="collapse" data-target=".navbar-collapse.in" id="about-btn"><i class="fa fa-question-circle white"></i>&nbsp;&nbsp;About</a></li>
+            <li class="hidden-xs"><a href="#" data-toggle="collapse" data-target=".navbar-collapse.in" id="list-btn"><i class="fa fa-list white"></i>&nbsp;&nbsp;Layers</a></li>
+            <li class="hidden-xs"><a href="/" data-toggle="collapse" data-target=".navbar-collapse.in" id="list-btn"><i class="fa fa-refresh white"></i>&nbsp;&nbsp;Reset</a></li>
+          </ul>
+        </div><!--/.navbar-collapse -->
+      </div>
+    </div>
+
+    <div id="container">
+      <div id="sidebar">
+        <div class="sidebar-wrapper">
+          <div class="panel panel-default" id="features">
+            <div class="panel-heading">
+              <h3 class="panel-title">Layers
+              <button type="button" class="btn btn-xs btn-default pull-right" id="sidebar-hide-btn"><i class="fa fa-chevron-left"></i></button></h3>
+            </div>
+            <div class="panel-body">
+              <div class="row">
+                <div class="col-md-12">
+                  <input id="filter" type="text" class="form-control search" placeholder="Filter" />
+                  <span id="searchclear" class="fa fa-times-circle"></span>
+                </div>
+              </div>
+            </div>
+            <div class="sidebar-table">
+              <table class="table table-hover" id="feature-list">
+                <thead class="hidden">
+                  <tr>
+                    <th>Name</th>
+                  <tr>
+                  <tr>
+                    <th>Chevron</th>
+                  <tr>
+                </thead>
+                <tbody class="searchable"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="map"></div>
+      <footer class="navbar-default navbar-fixed-bottom collapse" id="data-detail">
+        <div class="row">
+          <div class="container-fluid" id="data-container">
+            <div class='btn-toolbar pull-right data-buttons'>
+              <div class='btn-group'>
+                <button type='button' class='btn btn-default btn-mini' id='data-detail-clear-btn'>Clear</button>
+                <button type='button' class='btn btn-default btn-mini' id='data-detail-close-btn'>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="container-fluid" id="data-container">
+            <ul class="nav nav-tabs" id="data-tabs">
+              <li class="active"><a data-toggle="tab" href="#home">Home</a></li>
+              <li><a data-toggle="tab" href="#menu1">Menu 1</a></li>
+              <li><a data-toggle="tab" href="#menu2">Menu 2</a></li>
+            </ul>
+          </div>
+          <div class="tab-content" id=data-tab-contents>
+            <div id="home" class="tab-pane active">
+              <div class="panel panel-default">
+                <div class="table">
+                  <table class="table table-condensed table-striped table-hover">
+                    <thead>
+                      <th>Example</th>
+                      <th>Example 2</th>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div id="menu1" class="tab-pane fade">
+              <h3>Menu 1</h3>
+            </div>
+            <div id="menu2" class="tab-pane fade">
+              <h3>Menu 2</h3>
+            </div>
+          </div>
+        </div>
+      </footer>
+
+    </div>
+    <div class="modal fade" id="aboutModal" tabindex="-1" role="dialog">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button class="close" type="button" data-dismiss="modal" aria-hidden="true">&times;</button>
+            <h4 class="modal-title">Welcome to the TasMap.org</h4>
+          </div>
+          <div class="modal-body">
+            <h2>What have we here?</h2>
+            <p>
+              This is a simple, fast, lightweight mapping system. It harvests available datasets from Tasmanian State and Local Government authorities and provides basic viewing and information retrieval.
+            </p>
+            <h2>Whose data?</h2>
+            <p>
+              The map supports GeoServer WMS/WFS and ESRI REST services. If you have one and want to get it in here, get in touch. Currently the map supports data from the following sources:
+              <ul>
+                <li><a href="http://www.thelist.tas.gov.au">The LIST</a></li>
+                <li><a href="https://maps.gcc.tas.gov.au">Glenorchy City Council</a></li>
+                <li><a href="http://www.launceston.tas.gov.au/lcc/">City of Launceston.</a></li>
+              </ul>
+            </p>
+            <h2>Who did this?!</h2>
+            <p>
+              This mapping system was put together by Alex Leith for GovHack 2016. You can contact him at <a href="mailto://alexgleith@gmail.com">alexgleith (at) gmail.com</a>
+            </p>
+            <h2>Why doesn't it do X?</h2>
+            <p>
+              Because I built it in a weekend! If you think it should do more, come and chat about it at <a href="https://github.com/alexgleith/tasmap.org">GitHub</a>. You can either submit a pull request or create an issue.
+            </p>
+            <p>
+              In addition, you make like to contribute to the running of this little website by making a small donation.
+            </p>
+            <a href="https://donorbox.org/tasmaporg-funding" class="btn btn-primary" role="button" target="_blank">Donate</a>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-default" data-dismiss="modal">Close</button>
+          </div>
+        </div><!-- /.modal-content -->
+      </div><!-- /.modal-dialog -->
+    </div><!-- /.modal -->
+
+    <div class="modal fade" id="featureModal" tabindex="-1" role="dialog">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button class="close" type="button" data-dismiss="modal" aria-hidden="true">&times;</button>
+            <h4 class="modal-title text-primary" id="feature-title"></h4>
+          </div>
+          <div class="modal-body" id="feature-info"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+          </div>
+        </div><!-- /.modal-content -->
+      </div><!-- /.modal-dialog -->
+    </div><!-- /.modal --> 
+
+    <!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
+    <script>
+      (function(b,o,i,l,e,r){b.GoogleAnalyticsObject=l;b[l]||(b[l]=
+      function(){(b[l].q=b[l].q||[]).push(arguments)});b[l].l=+new Date;
+      e=o.createElement(i);r=o.getElementsByTagName(i)[0];
+      e.src='https://www.google-analytics.com/analytics.js';
+      r.parentNode.insertBefore(e,r)}(window,document,'script','ga'));
+      ga('create','UA-44445011-3');ga('send','pageview');
+    </script>
+
+    <!-- Google places API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDk66629MXhg6QKVEeKpaweURt7-sl9U-4&libraries=places"></script>
+
+    <script src="scripts/vendor.js"></script>
+    
+    <script src="scripts/plugins.js"></script>
+    
+    <script src="scripts/main.js"></script>
+  </body>
+</html>
