@@ -170,7 +170,7 @@ html, body {
   font-size: 12px;
 }
 
-.sidebar-basemaps, .sidebar-layers {
+.sidebar-basemaps, .sidebar-layers, .sidebar-active {
   padding: 8px 14px;
   overflow-y: auto;
 }
@@ -178,8 +178,14 @@ html, body {
   flex-shrink: 0;
   border-bottom: 1px solid #eee;
 }
+.sidebar-active {
+  flex-shrink: 0;
+  border-bottom: 1px solid #eee;
+  background: #fdf8f4;
+}
+.sidebar-active.hidden { display: none; }
 .sidebar-layers { flex: 1; overflow-y: auto; }
-.sidebar-basemaps h4, .sidebar-layers h4 {
+.sidebar-basemaps h4, .sidebar-layers h4, .sidebar-active h4 {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .5px;

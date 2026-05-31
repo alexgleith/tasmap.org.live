@@ -281,12 +281,35 @@ function removeLayerFromMap(layerId) {
 }
 
 function updateLayerListUI() {
-  document.querySelectorAll('.layer-item').forEach(el => {
+  // Update checkmarks in main list
+  document.querySelectorAll('#layer-list .layer-item').forEach(el => {
     const id = el.dataset.layerId;
     const isActive = addedLayerIds.includes(id);
     el.classList.toggle('active', isActive);
     el.querySelector('.layer-check').innerHTML = isActive ? '<i class="fa-solid fa-check"></i>' : '';
   });
+
+  // Rebuild pinned active layers section
+  const activeSection = document.getElementById('sidebar-active');
+  const activeList = document.getElementById('active-layer-list');
+  activeList.innerHTML = '';
+
+  if (addedLayerIds.length === 0) {
+    activeSection.classList.add('hidden');
+    return;
+  }
+
+  activeSection.classList.remove('hidden');
+  for (const id of addedLayerIds) {
+    const layer = allLayers[id];
+    if (!layer) continue;
+    const div = document.createElement('div');
+    div.className = 'layer-item active';
+    div.dataset.layerId = id;
+    div.innerHTML = `<span class="layer-check"><i class="fa-solid fa-check"></i></span><span class="layer-name">${layer.title}</span>`;
+    div.addEventListener('click', () => toggleLayer(id));
+    activeList.appendChild(div);
+  }
 }
 
 function updateLayersParam() {
