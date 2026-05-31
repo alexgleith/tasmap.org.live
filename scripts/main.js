@@ -113,9 +113,28 @@ const basemapObserver = new MutationObserver(() => {
     setParam('baseLayer', active.id === 'Topographic' ? null : active.id);
   }
 });
-// Observe the control container for click-driven changes
+
+// Custom thumbnails and tooltips for basemap switcher
+const basemapThumbs = {
+  'Topographic':  { img: 'images/basemaps/topographic.jpg', label: 'Topographic' },
+  'Imagery':      { img: 'images/basemaps/imagery.jpg',     label: 'Imagery' },
+  'Hillshade':    { img: 'images/basemaps/hillshade.jpg',   label: 'Hillshade' },
+  'Tasmap-25K':   { img: 'images/basemaps/tasmap25k.jpg',   label: 'Tasmap 25K' }
+};
+
 map.on('load', () => {
-  const el = basemapControl._container || document.querySelector('.basemaps');
+  // Replace auto-generated thumbnails with local images and add tooltips
+  const imgs = basemapControl._container.querySelectorAll('img.basemap');
+  imgs.forEach(img => {
+    const meta = basemapThumbs[img.dataset.id];
+    if (meta) {
+      img.src = meta.img;
+      img.title = meta.label;
+      img.alt = meta.label;
+    }
+  });
+  // Observe for URL param tracking
+  const el = basemapControl._container;
   if (el) basemapObserver.observe(el, { attributes: true, subtree: true });
 });
 

@@ -383,6 +383,17 @@ html, body {
   #data-detail { height: 200px; }
 }
 
+/* ---- Basemap switcher overrides ---- */
+.maplibregl-ctrl-basemaps .basemap {
+  object-fit: cover;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+.maplibregl-ctrl-basemaps .basemap:hover {
+  transform: scale(1.12);
+  z-index: 1;
+}
+
 @media print {
   #navbar, #sidebar, .maplibregl-control-container { display: none !important; }
 }
