@@ -377,13 +377,10 @@ function esriResultToGeoJSON(result) {
 
   if (geom) {
     if (geom.x !== undefined && geom.y !== undefined) {
-      // Point
       geometry = { type: 'Point', coordinates: [geom.x, geom.y] };
     } else if (geom.rings) {
-      // Polygon
       geometry = { type: 'Polygon', coordinates: geom.rings };
     } else if (geom.paths) {
-      // Polyline
       geometry = {
         type: geom.paths.length > 1 ? 'MultiLineString' : 'LineString',
         coordinates: geom.paths.length > 1 ? geom.paths : geom.paths[0]
@@ -391,6 +388,7 @@ function esriResultToGeoJSON(result) {
     }
   }
 
+  props._uuid = uuid;
   return { type: 'Feature', geometry, properties: props, id: uuid, uuid };
 }
 
@@ -522,8 +520,13 @@ function clearSelectedFeatures() {
   for (const id of ['selected-fills', 'selected-lines', 'selected-circles']) {
     if (map.getLayer(id)) map.removeLayer(id);
   }
+  for (const id of ['highlight-line', 'highlight-circle']) {
+    if (map.getLayer(id)) map.removeLayer(id);
+  }
   if (map.getSource('selected-features')) map.removeSource('selected-features');
+  if (map.getSource('highlight-feature')) map.removeSource('highlight-feature');
   Object.keys(featureUUIDs).forEach(k => delete featureUUIDs[k]);
+  hoveredUUID = null;
 }
 
 function clearIdentifyResults() {
@@ -531,6 +534,47 @@ function clearIdentifyResults() {
   document.getElementById('data-tab-contents').innerHTML = '';
   document.getElementById('data-detail').classList.remove('active');
 }
+
+// ============================================================
+// Map hover → highlight feature + table row
+// ============================================================
+let hoveredUUID = null;
+const SELECTABLE_LAYERS = ['selected-fills', 'selected-lines', 'selected-circles'];
+
+map.on('mousemove', (e) => {
+  const layers = SELECTABLE_LAYERS.filter(id => map.getLayer(id));
+  if (!layers.length) return;
+
+  const features = map.queryRenderedFeatures(e.point, { layers });
+  const uuid = features.length ? features[0].properties._uuid : null;
+
+  if (uuid === hoveredUUID) return;
+
+  // Un-highlight previous
+  if (hoveredUUID) unhighlightFeatureByUUID(hoveredUUID);
+
+  // Highlight new
+  if (uuid) {
+    highlightFeatureByUUID(uuid);
+    map.getCanvas().style.cursor = 'pointer';
+  } else {
+    map.getCanvas().style.cursor = '';
+  }
+  hoveredUUID = uuid;
+});
+
+map.on('mouseleave', 'selected-fills', () => {
+  if (hoveredUUID) { unhighlightFeatureByUUID(hoveredUUID); hoveredUUID = null; }
+  map.getCanvas().style.cursor = '';
+});
+map.on('mouseleave', 'selected-lines', () => {
+  if (hoveredUUID) { unhighlightFeatureByUUID(hoveredUUID); hoveredUUID = null; }
+  map.getCanvas().style.cursor = '';
+});
+map.on('mouseleave', 'selected-circles', () => {
+  if (hoveredUUID) { unhighlightFeatureByUUID(hoveredUUID); hoveredUUID = null; }
+  map.getCanvas().style.cursor = '';
+});
 
 // Feature highlighting from table
 function highlightFeatureByUUID(uuid) {
