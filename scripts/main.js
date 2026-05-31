@@ -6,7 +6,6 @@
 const allLayers = {};        // id → layer descriptor
 const addedLayerIds = [];    // ids of layers currently on map
 const featureUUIDs = {};     // uuid → GeoJSON feature (for table hover)
-let activeBaseMap = null;
 
 const HIDDEN_PROPS = new Set([
   'bbox', 'SHAPE.LEN', 'SHAPE', 'SHAPE.AREA', 'LIST_GUID',
@@ -32,36 +31,38 @@ function setParam(name, value) {
 // Basemaps
 // ============================================================
 const LIST_BASE = 'https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps';
-const basemaps = {
-  'Topographic': {
-    url: `${LIST_BASE}/Topographic/MapServer/tile/{z}/{y}/{x}`,
-    maxzoom: 18,
-    attribution: 'Basemap © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania'
+const basemapConfigs = [
+  {
+    id: 'Topographic',
+    tiles: [`${LIST_BASE}/Topographic/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 18,
+      attribution: 'Basemap © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
   },
-  'Imagery': {
-    url: `${LIST_BASE}/Orthophoto/MapServer/tile/{z}/{y}/{x}`,
-    maxzoom: 19,
-    attribution: 'Imagery © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania'
+  {
+    id: 'Imagery',
+    tiles: [`${LIST_BASE}/Orthophoto/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 19,
+      attribution: 'Imagery © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
   },
-  'Hillshade': {
-    url: `${LIST_BASE}/Hillshade/MapServer/tile/{z}/{y}/{x}`,
-    maxzoom: 18,
-    attribution: 'Hillshade © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania'
+  {
+    id: 'Hillshade',
+    tiles: [`${LIST_BASE}/Hillshade/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 18,
+      attribution: 'Hillshade © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
   },
-  'Tasmap 25K': {
-    url: `${LIST_BASE}/Tasmap25K/MapServer/tile/{z}/{y}/{x}`,
-    maxzoom: 18,
-    attribution: 'Tasmap25K © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania'
+  {
+    id: 'Tasmap-25K',
+    tiles: [`${LIST_BASE}/Tasmap25K/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 18,
+      attribution: 'Tasmap25K © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
   }
-};
+];
 
 // ============================================================
 // Map initialisation
 // ============================================================
-let initialBase = getParam('baseLayer');
-if (initialBase) initialBase = initialBase.replace(/-/g, ' ');
-else initialBase = 'Topographic';
-if (!basemaps[initialBase]) initialBase = 'Topographic';
+let initialBase = getParam('baseLayer') || 'Topographic';
+if (!basemapConfigs.find(b => b.id === initialBase)) initialBase = 'Topographic';
 
 const initialLayers = getParam('layers') ? getParam('layers').split(';') : [];
 
@@ -75,28 +76,13 @@ if (location.hash) {
   }
 }
 
-const bm = basemaps[initialBase];
 const map = new maplibregl.Map({
   container: 'map',
-  style: {
-    version: 8,
-    sources: {
-      basemap: {
-        type: 'raster',
-        tiles: [bm.url],
-        tileSize: 256,
-        maxzoom: bm.maxzoom,
-        attribution: bm.attribution
-      }
-    },
-    layers: [{ id: 'basemap', type: 'raster', source: 'basemap' }]
-  },
+  style: { version: 8, sources: {}, layers: [] },
   center: initCenter,
   zoom: initZoom,
   maxZoom: 20
 });
-
-activeBaseMap = initialBase;
 
 // Navigation & geolocation controls
 map.addControl(new maplibregl.NavigationControl(), 'top-left');
@@ -107,6 +93,32 @@ map.addControl(new maplibregl.GeolocateControl({
 }), 'top-left');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
+// Basemap switcher control (thumbnails on the map)
+const basemapControl = new MaplibreGLBasemapsControl({
+  basemaps: basemapConfigs,
+  initialBasemap: initialBase,
+  expandDirection: 'top'
+});
+map.addControl(basemapControl, 'bottom-right');
+
+// Track basemap changes for URL param
+let activeBaseMap = initialBase;
+const basemapObserver = new MutationObserver(() => {
+  const active = basemapConfigs.find(b => {
+    const layer = map.getLayer(b.id);
+    return layer && map.getLayoutProperty(b.id, 'visibility') === 'visible';
+  });
+  if (active && active.id !== activeBaseMap) {
+    activeBaseMap = active.id;
+    setParam('baseLayer', active.id === 'Topographic' ? null : active.id);
+  }
+});
+// Observe the control container for click-driven changes
+map.on('load', () => {
+  const el = basemapControl._container || document.querySelector('.basemaps');
+  if (el) basemapObserver.observe(el, { attributes: true, subtree: true });
+});
+
 // ============================================================
 // URL hash sync (zoom/lat/lng)
 // ============================================================
@@ -116,44 +128,6 @@ function updateHash() {
   location.hash = `${z}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}`;
 }
 map.on('moveend', updateHash);
-
-// ============================================================
-// Basemap switcher (sidebar)
-// ============================================================
-function buildBasemapList() {
-  const container = document.getElementById('basemap-list');
-  container.innerHTML = '';
-  for (const name of Object.keys(basemaps)) {
-    const div = document.createElement('div');
-    div.className = 'basemap-item' + (name === activeBaseMap ? ' active' : '');
-    div.textContent = name;
-    div.addEventListener('click', () => switchBasemap(name));
-    container.appendChild(div);
-  }
-}
-
-function switchBasemap(name) {
-  if (name === activeBaseMap) return;
-  const bm = basemaps[name];
-  const src = map.getSource('basemap');
-  // MapLibre doesn't let you update tiles on an existing source, so replace it
-  map.removeLayer('basemap');
-  map.removeSource('basemap');
-  map.addSource('basemap', {
-    type: 'raster',
-    tiles: [bm.url],
-    tileSize: 256,
-    maxzoom: bm.maxzoom,
-    attribution: bm.attribution
-  });
-  // Add basemap layer beneath all other layers
-  const firstOverlay = map.getStyle().layers.find(l => l.id !== 'basemap');
-  map.addLayer({ id: 'basemap', type: 'raster', source: 'basemap' },
-    firstOverlay ? firstOverlay.id : undefined);
-  activeBaseMap = name;
-  buildBasemapList();
-  setParam('baseLayer', name === 'Topographic' ? null : name.replace(/ /g, '-'));
-}
 
 // ============================================================
 // Esri REST layer discovery
@@ -784,6 +758,5 @@ document.getElementById('about-overlay').addEventListener('click', (e) => {
 // Boot
 // ============================================================
 map.on('load', () => {
-  buildBasemapList();
   discoverEsriLayers(LIST_REST, 'Public', 'list');
 });

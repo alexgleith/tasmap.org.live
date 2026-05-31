@@ -170,13 +170,9 @@ html, body {
   font-size: 12px;
 }
 
-.sidebar-basemaps, .sidebar-layers, .sidebar-active {
+.sidebar-active, .sidebar-layers {
   padding: 8px 14px;
   overflow-y: auto;
-}
-.sidebar-basemaps {
-  flex-shrink: 0;
-  border-bottom: 1px solid #eee;
 }
 .sidebar-active {
   flex-shrink: 0;
@@ -185,7 +181,7 @@ html, body {
 }
 .sidebar-active.hidden { display: none; }
 .sidebar-layers { flex: 1; overflow-y: auto; }
-.sidebar-basemaps h4, .sidebar-layers h4, .sidebar-active h4 {
+.sidebar-layers h4, .sidebar-active h4 {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .5px;
@@ -193,7 +189,7 @@ html, body {
   margin-bottom: 6px;
 }
 
-.basemap-item, .layer-item {
+.layer-item {
   padding: 6px 8px;
   border-radius: 4px;
   cursor: pointer;
@@ -203,8 +199,7 @@ html, body {
   font-size: 13px;
   user-select: none;
 }
-.basemap-item:hover, .layer-item:hover { background: #f5f5f5; }
-.basemap-item.active { background: var(--brand); color: #fff; }
+.layer-item:hover { background: #f5f5f5; }
 .layer-item.active { background: #e8f4e8; }
 .layer-item .layer-check {
   width: 16px;

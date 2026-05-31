@@ -9,6 +9,7 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl-basemaps@0.1.3/lib/basemaps.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="styles/main.css">
   </head>
@@ -39,10 +40,6 @@
         <div class="sidebar-filter">
           <input id="filter" type="text" placeholder="Filter layers...">
           <button id="searchclear" title="Clear filter"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-        <div class="sidebar-basemaps">
-          <h4>Basemaps</h4>
-          <div id="basemap-list"></div>
         </div>
         <div class="sidebar-active hidden" id="sidebar-active">
           <h4>Active Layers</h4>
@@ -92,6 +89,7 @@
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/maplibre-gl-basemaps@0.1.3/lib/index.js"></script>
     <script src="scripts/main.js"></script>
   </body>
 </html>
