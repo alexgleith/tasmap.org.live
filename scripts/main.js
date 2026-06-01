@@ -81,11 +81,12 @@ const map = new maplibregl.Map({
   style: { version: 8, sources: {}, layers: [] },
   center: initCenter,
   zoom: initZoom,
-  maxZoom: 20
+  maxZoom: 20,
+  maxPitch: 85
 });
 
 // Navigation & geolocation controls
-map.addControl(new maplibregl.NavigationControl(), 'top-left');
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
 map.addControl(new maplibregl.GeolocateControl({
   positionOptions: { enableHighAccuracy: true },
   trackUserLocation: true,
@@ -100,6 +101,9 @@ const basemapControl = new MaplibreGLBasemapsControl({
   expandDirection: 'top'
 });
 map.addControl(basemapControl, 'bottom-right');
+
+// 3D terrain
+map.addControl(new maplibregl.TerrainControl({ source: 'terrainDEM', exaggeration: 1.5 }), 'top-left');
 
 // Track basemap changes for URL param
 let activeBaseMap = initialBase;
@@ -123,6 +127,24 @@ const basemapThumbs = {
 };
 
 map.on('load', () => {
+  // 3D terrain DEM source
+  map.addSource('terrainDEM', {
+    type: 'raster-dem',
+    tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+    encoding: 'terrarium',
+    tileSize: 256,
+    maxzoom: 15,
+    attribution: '© <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Tilezen Joerd</a>'
+  });
+  map.setTerrain({ source: 'terrainDEM', exaggeration: 1.5 });
+  map.setSky({
+    'sky-color': '#199EF3',
+    'horizon-color': '#f0f8ff',
+    'fog-color': '#ffffff',
+    'fog-ground-blend': 0.5,
+    'sky-horizon-blend': 0.5
+  });
+
   // Replace auto-generated thumbnails with local images and add tooltips
   const imgs = basemapControl._container.querySelectorAll('img.basemap');
   imgs.forEach(img => {
