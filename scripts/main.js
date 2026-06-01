@@ -660,6 +660,18 @@ function linkify(val) {
 let searchTimeout = null;
 const searchBox = document.getElementById('searchbox');
 const searchResults = document.getElementById('search-results');
+const searchContainer = searchBox.closest('.search-container');
+const searchToggle = document.getElementById('search-toggle-btn');
+
+// Mobile: toggle search input visibility
+searchToggle.addEventListener('click', () => {
+  searchContainer.classList.toggle('expanded');
+  if (searchContainer.classList.contains('expanded')) {
+    searchBox.focus();
+  } else {
+    searchResults.classList.remove('active');
+  }
+});
 
 searchBox.addEventListener('input', () => {
   clearTimeout(searchTimeout);
@@ -675,7 +687,10 @@ searchBox.addEventListener('keydown', (e) => {
 searchBox.addEventListener('focus', () => searchBox.select());
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.search-container')) searchResults.classList.remove('active');
+  if (!e.target.closest('.search-container')) {
+    searchResults.classList.remove('active');
+    searchContainer.classList.remove('expanded');
+  }
 });
 
 async function searchNominatim(query) {
