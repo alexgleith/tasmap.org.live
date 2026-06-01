@@ -1,190 +1,95 @@
 <!doctype html>
-<html lang="">
+<html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="description" content="">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"/> <!--320-->
+    <meta name="description" content="TasMap.org — A fast, lightweight map viewer for Tasmanian government spatial data from the LIST.">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>TasMap.org</title>
 
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
-    <!-- Place favicon.ico in the root directory -->
 
-    <link rel="stylesheet" href="styles/vendor.css">
-
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl-basemaps@0.1.3/lib/basemaps.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="styles/main.css">
-    
   </head>
   <body>
-    <!--[if lt IE 10]>
-      <p class="browserupgrade">You are using an <strong>outdated</strong> browser. Please <a href="http://browsehappy.com/">upgrade your browser</a> to improve your experience.</p>
-    <![endif]-->
-    <div class="navbar navbar-inverse navbar-fixed-top" role="navigation">
-      <div class="container-fluid">
-        <div class="navbar-header">
-          <div class="navbar-icon-container">
-            <a href="#" class="navbar-icon pull-right visible-xs" style="color:#ffffff" id="nav-btn"><i class="fa fa-bars fa-lg white"></i></a>
-            <a href="#" class="navbar-icon pull-right visible-xs" style="color:#ffffff"  id="sidebar-toggle-btn"><i class="fa fa-list fa-lg white"></i></a>
-            <a href="/" class="navbar-icon pull-right visible-xs" style="color:#ffffff"><i class="fa fa-refresh fa-lg white"></i></a>
-          </div>
-          <a class="navbar-brand" href="#">TasMap.org</a>
-        </div>
-        <div class="navbar-collapse collapse">
-          <form class="navbar-form navbar-right" role="search">
-            <div class="form-group has-feedback">
-                <input id="searchbox" type="text" placeholder="Search" class="form-control">
-                <span id="searchicon" class="fa fa-search form-control-feedback white"></span>
-            </div>
-          </form>
-          <ul class="nav navbar-nav">
-            <li><a href="#" data-toggle="collapse" data-target=".navbar-collapse.in" id="about-btn"><i class="fa fa-question-circle white"></i>&nbsp;&nbsp;About</a></li>
-            <li class="hidden-xs"><a href="#" data-toggle="collapse" data-target=".navbar-collapse.in" id="list-btn"><i class="fa fa-list white"></i>&nbsp;&nbsp;Layers</a></li>
-            <li class="hidden-xs"><a href="/" data-toggle="collapse" data-target=".navbar-collapse.in" id="list-btn"><i class="fa fa-refresh white"></i>&nbsp;&nbsp;Reset</a></li>
-          </ul>
-        </div><!--/.navbar-collapse -->
+    <nav id="navbar">
+      <div class="nav-left">
+        <button class="nav-btn mobile-only" id="sidebar-toggle-btn" title="Toggle layers"><i class="fa-solid fa-layer-group"></i></button>
+        <a class="nav-brand" href="/">TasMap.org</a>
       </div>
-    </div>
+      <div class="nav-right">
+        <div class="search-container">
+          <input id="searchbox" type="text" placeholder="Search places..." autocomplete="off">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <div id="search-results" class="search-results"></div>
+        </div>
+        <button class="nav-btn" id="about-btn" title="About"><i class="fa-solid fa-circle-question"></i></button>
+        <button class="nav-btn desktop-only" id="list-btn" title="Toggle layers"><i class="fa-solid fa-layer-group"></i></button>
+        <a class="nav-btn" href="/" title="Reset"><i class="fa-solid fa-rotate-right"></i></a>
+      </div>
+    </nav>
 
     <div id="container">
       <div id="sidebar">
-        <div class="sidebar-wrapper">
-          <div class="panel panel-default" id="features">
-            <div class="panel-heading">
-              <h3 class="panel-title">Layers
-              <button type="button" class="btn btn-xs btn-default pull-right" id="sidebar-hide-btn"><i class="fa fa-chevron-left"></i></button></h3>
-            </div>
-            <div class="panel-body">
-              <div class="row">
-                <div class="col-md-12">
-                  <input id="filter" type="text" class="form-control search" placeholder="Filter" />
-                  <span id="searchclear" class="fa fa-times-circle"></span>
-                </div>
-              </div>
-            </div>
-            <div class="sidebar-table">
-              <table class="table table-hover" id="feature-list">
-                <thead class="hidden">
-                  <tr>
-                    <th>Name</th>
-                  <tr>
-                  <tr>
-                    <th>Chevron</th>
-                  <tr>
-                </thead>
-                <tbody class="searchable"></tbody>
-              </table>
-            </div>
-          </div>
+        <div class="sidebar-header">
+          <h3>Layers</h3>
+          <button id="sidebar-hide-btn" title="Hide sidebar"><i class="fa-solid fa-chevron-left"></i></button>
+        </div>
+        <div class="sidebar-filter">
+          <input id="filter" type="text" placeholder="Filter layers...">
+          <button id="searchclear" title="Clear filter"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="sidebar-active hidden" id="sidebar-active">
+          <h4>Active Layers</h4>
+          <div id="active-layer-list"></div>
+        </div>
+        <div class="sidebar-layers">
+          <h4>Data Layers</h4>
+          <div id="layer-list"></div>
         </div>
       </div>
+
       <div id="map"></div>
-      <footer class="navbar-default navbar-fixed-bottom collapse" id="data-detail">
-        <div class="row">
-          <div class="container-fluid" id="data-container">
-            <div class='btn-toolbar pull-right data-buttons'>
-              <div class='btn-group'>
-                <button type='button' class='btn btn-default btn-mini' id='data-detail-clear-btn'>Clear</button>
-                <button type='button' class='btn btn-default btn-mini' id='data-detail-close-btn'>Close</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="row">
-          <div class="container-fluid" id="data-container">
-            <ul class="nav nav-tabs" id="data-tabs">
-              <li class="active"><a data-toggle="tab" href="#home">Home</a></li>
-              <li><a data-toggle="tab" href="#menu1">Menu 1</a></li>
-              <li><a data-toggle="tab" href="#menu2">Menu 2</a></li>
-            </ul>
-          </div>
-          <div class="tab-content" id=data-tab-contents>
-            <div id="home" class="tab-pane active">
-              <div class="panel panel-default">
-                <div class="table">
-                  <table class="table table-condensed table-striped table-hover">
-                    <thead>
-                      <th>Example</th>
-                      <th>Example 2</th>
-                    </thead>
-                    <tbody>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-            <div id="menu1" class="tab-pane fade">
-              <h3>Menu 1</h3>
-            </div>
-            <div id="menu2" class="tab-pane fade">
-              <h3>Menu 2</h3>
-            </div>
-          </div>
-        </div>
-      </footer>
 
+      <div id="data-detail">
+        <div class="data-header">
+          <ul id="data-tabs"></ul>
+          <div class="data-buttons">
+            <button id="data-detail-clear-btn" title="Clear features">Clear</button>
+            <button id="data-detail-close-btn" title="Close panel">Close</button>
+          </div>
+        </div>
+        <div id="data-tab-contents"></div>
+      </div>
     </div>
-    <div class="modal fade" id="aboutModal" tabindex="-1" role="dialog">
-      <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-          <div class="modal-header">
-            <button class="close" type="button" data-dismiss="modal" aria-hidden="true">&times;</button>
-            <h4 class="modal-title">Welcome to the TasMap.org</h4>
-          </div>
-          <div class="modal-body">
-            <h2>What have we here?</h2>
-            <p>
-              This is a simple, fast, lightweight mapping system. It harvests available datasets from Tasmanian State and Local Government authorities and provides basic viewing and information retrieval.
-            </p>
-            <h2>Whose data?</h2>
-            <p>
-              The map supports GeoServer WMS/WFS and ESRI REST services. If you have one and want to get it in here, get in touch. Currently the map supports data from the following sources:
-              <ul>
-                <li><a href="http://www.thelist.tas.gov.au">The LIST</a></li>
-                <li><a href="https://maps.gcc.tas.gov.au">Glenorchy City Council</a></li>
-                <li><a href="http://www.launceston.tas.gov.au/lcc/">City of Launceston.</a></li>
-              </ul>
-            </p>
-            <h2>Who did this?!</h2>
-            <p>
-              This mapping system was put together by Alex Leith for GovHack 2016. You can contact him at <a href="mailto://alexgleith@gmail.com">alexgleith (at) gmail.com</a>
-            </p>
-            <h2>Why doesn't it do X?</h2>
-            <p>
-              Because I built it in a weekend! If you think it should do more, come and chat about it at <a href="https://github.com/alexgleith/tasmap.org">GitHub</a>. You can either submit a pull request or create an issue.
-            </p>
-            <p>
-              In addition, you make like to contribute to the running of this little website by making a small donation.
-            </p>
-            <a href="https://donorbox.org/tasmaporg-funding" class="btn btn-primary" role="button" target="_blank">Donate</a>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-default" data-dismiss="modal">Close</button>
-          </div>
-        </div><!-- /.modal-content -->
-      </div><!-- /.modal-dialog -->
-    </div><!-- /.modal -->
 
-    <div class="modal fade" id="featureModal" tabindex="-1" role="dialog">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <button class="close" type="button" data-dismiss="modal" aria-hidden="true">&times;</button>
-            <h4 class="modal-title text-primary" id="feature-title"></h4>
-          </div>
-          <div class="modal-body" id="feature-info"></div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
-          </div>
-        </div><!-- /.modal-content -->
-      </div><!-- /.modal-dialog -->
-    </div><!-- /.modal --> 
+    <div id="about-overlay" class="modal-overlay hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h2>Welcome to TasMap.org</h2>
+          <button class="modal-close" id="about-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <h3>What is this?</h3>
+          <p>A simple, fast, lightweight mapping system. It discovers available datasets from Tasmanian government authorities and provides viewing and feature information retrieval.</p>
 
-    <!-- Google places API -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA8JJWSgraSv3AQnWppwH7z4S_eOB28fEA&libraries=places"></script>
+          <h3>Data sources</h3>
+          <p>Currently supporting Esri REST services from:</p>
+          <ul>
+            <li><a href="https://www.thelist.tas.gov.au" target="_blank">The LIST</a> — Land Information System Tasmania</li>
+          </ul>
 
-    <script src="scripts/vendor.js"></script>
-    
-    <script src="scripts/plugins.js"></script>
-    
+          <h3>Who built this?</h3>
+          <p>Originally built by Alex Leith for GovHack 2016, rebuilt with MapLibre GL JS.</p>
+          <p>Source code on <a href="https://github.com/alexgleith/tasmap.org" target="_blank">GitHub</a>.</p>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/maplibre-gl-basemaps@0.1.3/lib/index.js"></script>
     <script src="scripts/main.js"></script>
   </body>
 </html>

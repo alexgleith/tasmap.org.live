@@ -1,703 +1,781 @@
 'use strict';
 
-//Leaflet images config:
-L.Icon.Default.imagePath = './scripts/images';
+// ============================================================
+// State
+// ============================================================
+const allLayers = {};        // id → layer descriptor
+const addedLayerIds = [];    // ids of layers currently on map
+const featureUUIDs = {};     // uuid → GeoJSON feature (for table hover)
 
-var map;
-var allLayers = {};
-var overlays = {};
-var addedLayers = [];
-var selectedFeatures = [];
-var allSingleLayers = {};
+const HIDDEN_PROPS = new Set([
+  'bbox', 'SHAPE.LEN', 'SHAPE', 'SHAPE.AREA', 'LIST_GUID',
+  'OBJECTID', 'Shape', 'Shape.STLength()', 'Shape.STArea()',
+  'Shape_Length', 'Shape_Area'
+]);
 
-var debug = false;
-var debugLevel = 4;
-
-var initialBaseLayer = getParameterByName('baseLayer');
-if (!initialBaseLayer) {
-  initialBaseLayer = 'LIST Topographic';
-} else {
-  initialBaseLayer = initialBaseLayer.replace('-', ' ');
+// ============================================================
+// URL parameter helpers
+// ============================================================
+function getParam(name) {
+  return new URLSearchParams(location.search).get(name);
 }
 
-var initialLayers = getParameterByName('layers');
-if (initialLayers != null) {
-  initialLayers = initialLayers.split(';');
+function setParam(name, value) {
+  const url = new URL(location.href);
+  if (value) url.searchParams.set(name, value);
+  else url.searchParams.delete(name);
+  history.replaceState({}, '', url.toString());
 }
 
-$(document).on('click', '.feature-row', function (e) {
-  // $(document).off("mouseout", ".feature-row", clearHighlight)
-  var thisLayer = allLayers[$(this).attr('id')];
-  addLayerToMap(thisLayer);
-  if (screen.width < 767) {
-    animateSidebar();
+// ============================================================
+// Basemaps
+// ============================================================
+const LIST_BASE = 'https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps';
+const basemapConfigs = [
+  {
+    id: 'Topographic',
+    tiles: [`${LIST_BASE}/Topographic/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 18,
+      attribution: 'Basemap © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
+  },
+  {
+    id: 'Imagery',
+    tiles: [`${LIST_BASE}/Orthophoto/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 19,
+      attribution: 'Imagery © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
+  },
+  {
+    id: 'Hillshade',
+    tiles: [`${LIST_BASE}/Hillshade/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 18,
+      attribution: 'Hillshade © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
+  },
+  {
+    id: 'Tasmap-25K',
+    tiles: [`${LIST_BASE}/Tasmap25K/MapServer/tile/{z}/{y}/{x}`],
+    sourceExtraParams: { tileSize: 256, maxzoom: 18,
+      attribution: 'Tasmap25K © <a href="https://www.thelist.tas.gov.au">the LIST</a>, State of Tasmania' }
   }
-});
+];
 
-// data table actions
-$(document).on("mouseenter", ".data-table tr", function (e) {
-  var id = $(this)[0].id;
-  var layer = allSingleLayers[id];
-  if (layer != null) {
-    highlightLayer(layer);
+// ============================================================
+// Map initialisation
+// ============================================================
+let initialBase = getParam('baseLayer') || 'Topographic';
+if (!basemapConfigs.find(b => b.id === initialBase)) initialBase = 'Topographic';
+
+const initialLayers = getParam('layers') ? getParam('layers').split(';') : [];
+
+// Parse hash for initial center/zoom: #zoom/lat/lng
+let initZoom = 8, initCenter = [146.780, -42.070];
+if (location.hash) {
+  const parts = location.hash.replace('#', '').split('/');
+  if (parts.length === 3) {
+    initZoom = parseFloat(parts[0]) || 8;
+    initCenter = [parseFloat(parts[2]) || 146.780, parseFloat(parts[1]) || -42.070];
   }
-});
-$(document).on("mouseleave", ".data-table tr", function (e) {
-  var id = $(this)[0].id;
-  var layer = allSingleLayers[id];
-  if (layer != null) {
-    resetLayer(layer);
-  }
-});
-$(document).on("click", ".data-table tr", function (e) {
-  var id = $(this)[0].id;
-  var layer = allSingleLayers[id];
-  if (layer != null) {
-    try {
-      map.fitBounds(layer.getBounds());
-    } catch (TypeError) {
-      map.panTo(layer._latlng);
-    }
-  }
+}
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: { version: 8, sources: {}, layers: [] },
+  center: initCenter,
+  zoom: initZoom,
+  maxZoom: 20
 });
 
-$('#about-btn').click(function () {
-  $('#aboutModal').modal('show');
-  $('.navbar-collapse.in').collapse('hide');
-  return false;
-});
+// Navigation & geolocation controls
+map.addControl(new maplibregl.NavigationControl(), 'top-left');
+map.addControl(new maplibregl.GeolocateControl({
+  positionOptions: { enableHighAccuracy: true },
+  trackUserLocation: true,
+  showUserHeading: true
+}), 'top-left');
+map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
-$('#data-detail-close-btn').click(function () {
-  $('#data-detail').slideUp();
-  return false;
+// Basemap switcher control (thumbnails on the map)
+const basemapControl = new MaplibreGLBasemapsControl({
+  basemaps: basemapConfigs,
+  initialBasemap: initialBase,
+  expandDirection: 'top'
 });
-$('#data-detail-clear-btn').click(function () {
-  clearSelectedFeatures();
-  $('#data-detail').slideUp();
-  return false;
-});
+map.addControl(basemapControl, 'bottom-right');
 
-$('#full-extent-btn').click(function () {
-  // map.fitBounds(boroughs.getBounds())
-  $('.navbar-collapse.in').collapse('hide');
-  return false;
-});
-
-$('#legend-btn').click(function () {
-  $('#legendModal').modal('show');
-  $('.navbar-collapse.in').collapse('hide');
-  return false;
-});
-
-$('#login-btn').click(function () {
-  $('#loginModal').modal('show');
-  $('.navbar-collapse.in').collapse('hide');
-  return false;
-});
-
-$('#list-btn').click(function () {
-  animateSidebar();
-  return false;
-});
-
-$('#nav-btn').click(function () {
-  $('.navbar-collapse').collapse('toggle');
-  return false;
-});
-
-$('#sidebar-toggle-btn').click(function () {
-  animateSidebar();
-  return false;
-});
-
-$('#sidebar-hide-btn').click(function () {
-  animateSidebar();
-  return false;
-});
-
-function animateSidebar() {
-  $('#sidebar').animate({
-    width: 'toggle'
-  }, 350, function () {
-    map.invalidateSize();
+// Track basemap changes for URL param
+let activeBaseMap = initialBase;
+const basemapObserver = new MutationObserver(() => {
+  const active = basemapConfigs.find(b => {
+    const layer = map.getLayer(b.id);
+    return layer && map.getLayoutProperty(b.id, 'visibility') === 'visible';
   });
-}
-
-/* Basemap Layers */
-var LISTTopographic = new L.tileLayer('https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps/Topographic/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Topographic Basemap from <a href=https://www.thelist.tas.gov.au>the LIST</a> &copy State of Tasmania',
-  maxZoom: 20,
-  maxNativeZoom: 18
+  if (active && active.id !== activeBaseMap) {
+    activeBaseMap = active.id;
+    setParam('baseLayer', active.id === 'Topographic' ? null : active.id);
+  }
 });
 
-var LISTAerial = new L.tileLayer('https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps/Orthophoto/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Base Imagery from <a href=https://www.thelist.tas.gov.au>the LIST</a> &copy State of Tasmania',
-  maxZoom: 20,
-  maxNativeZoom: 19
-});
-
-var LISTHillshade= new L.tileLayer('https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps/Hillshade/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Hillshade from <a href=https://www.thelist.tas.gov.au>the LIST</a> &copy State of Tasmania',
-  maxZoom: 20,
-  maxNativeZoom: 18
-});
-
-var LISTTasmap25K= new L.tileLayer('https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps/Tasmap25K/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'TasMap25K from <a href=https://www.thelist.tas.gov.au>the LIST</a> &copy State of Tasmania',
-  maxZoom: 20,
-  maxNativeZoom: 18
-});
-
-var baseLayers = {
-  'LIST Topographic': LISTTopographic,
-  'LIST Imagery': LISTAerial,
-  "LIST Hillshade": LISTHillshade,
-  "LIST Tasmap 25K": LISTTasmap25K
+// Custom thumbnails and tooltips for basemap switcher
+const basemapThumbs = {
+  'Topographic':  { img: 'images/basemaps/topographic.jpg', label: 'Topographic' },
+  'Imagery':      { img: 'images/basemaps/imagery.jpg',     label: 'Imagery' },
+  'Hillshade':    { img: 'images/basemaps/hillshade.jpg',   label: 'Hillshade' },
+  'Tasmap-25K':   { img: 'images/basemaps/tasmap25k.jpg',   label: 'Tasmap 25K' }
 };
 
-map = L.map('map', {
-  zoom: 8,
-  center: [-42.070, 146.780],
-  layers: baseLayers[initialBaseLayer],
-  zoomControl: true,
-  attributionControl: false
-});
-
-/* GPS enabled geolocation control set to follow the user's location */
-var locateControl = L.control.locate({
-  position: 'topleft',
-  markerStyle: {
-    weight: 1,
-    opacity: 0.8,
-    fillOpacity: 0.8
-  },
-  circleStyle: {
-    weight: 1,
-    clickable: false
-  },
-  icon: 'fa fa-location-arrow',
-  metric: true,
-  strings: {
-    title: 'My location',
-    popup: 'You are within {distance} {unit} of this point',
-    outsideMapBoundsMsg: 'You seem located outside the boundaries of the map'
-  }
-}).addTo(map);
-
-/* Larger screens get expanded layer control and visible sidebar */
-if (document.body.clientWidth <= 767) {
-  var isCollapsed = true;
-} else {
-  var isCollapsed = false;
-}
-
-var layerControl = L.control.layers(baseLayers, overlays, {
-  collapsed: isCollapsed
-}).addTo(map);
-
-var LISTRest = "https://services.thelist.tas.gov.au/arcgis/rest/services/";
-// GCC Maps is dead, long live GCC Maps
-// var GlenorchyWMS = "https://maps.gcc.tas.gov.au/geoserver/GCC_cc/ows";
-var MRTWMS = "https://www.mrt.tas.gov.au/web-services/ows";
-var CityOfLauncestonRest =
-  "https://mapping.launceston.tas.gov.au/arcgis/rest/services/";
-// var CityOfHobartRest =
-//   "https://services1.arcgis.com/NHqdsnvwfSTg42I8/arcgis/rest/services/";
-
-getWMS(MRTWMS, { label: "MRT" });
-getArcGISREST(CityOfLauncestonRest, "Public", { f: "pjson" }, { label: "lcc" });
-getArcGISREST(LISTRest, "Public", { f: "pjson" }, { label: "list" });
-// getArcGISREST(CityOfHobartRest, '', {f: 'pjson'}, {label: 'hcc'})
-
-function getWMS(baseURL, options) {
-  $.get(baseURL + '?SERVICE=WMS&request=getcapabilities', function (xml) {
-    $(xml).find('Layer').find('Layer').each(function () {
-      var title = $(this).find('Title').first().text();
-      var name = $(this).find('Name').first().text();
-
-      // Check for layer groups
-      var patt = new RegExp('Group');
-      var res = patt.test(title);
-      if (!res) {
-        var oneLayer = {
-          id: options.label + '-' + name,
-          group: '',
-          title: title
-        };
-        addLayerToList(oneLayer);
-        oneLayer.meta = { name: name };
-        oneLayer.url = baseURL;
-        oneLayer.type = 'wms';
-        oneLayer.added = false;
-        oneLayer.visible = false;
-        allLayers[oneLayer.id] = oneLayer;
-
-        // If the layer is in the initial list, load it
-        if ($.inArray(oneLayer.id, initialLayers) !== -1) {
-          addLayerToMap(oneLayer);
-        }
-      }
-    });
-  });
-}
-
-function getArcGISREST(baseURL, startLocation, params, options) {
-  log("Getting REST info for: " + options.label, 3);
-  $.getJSON(baseURL + startLocation, params, function (data) {
-    var services = data.services;
-    if (services != null) {
-      for (var i = services.length - 1; i >= 0; i--) {
-        if (services[i].type === 'MapServer') {
-          var thisService = services[i];
-          var thisURL = baseURL + thisService.name + '/MapServer';
-          $.getJSON(thisURL, params, function (url, service) {
-            return function (data) {
-              var layers = data.layers;
-              for (var j = layers.length - 1; j >= 0; j--) {
-                var thisLayer = layers[j];
-                var oneLayer = {
-                  id: options.label + '-' + service.name + '-' + thisLayer.id,
-                  group: service.name,
-                  title: thisLayer.name
-                };
-                addLayerToList(oneLayer);
-                oneLayer.meta = thisLayer;
-                oneLayer.url = url;
-                oneLayer.type = 'esri';
-                oneLayer.added = false;
-                oneLayer.visible = false;
-                allLayers[oneLayer.id] = oneLayer;
-
-                // If the layer is in the initial list, load it
-                if ($.inArray(oneLayer.id, initialLayers) !== -1) {
-                  addLayerToMap(oneLayer);
-                }
-              }
-            };
-          }(thisURL, thisService));
-        } else if (services[i].type = 'FeatureServer') {
-          // We don't support feature service, Hobart... Get some map services sorted!!!
-          log("Not yet implemented featureserver...", 1);
-        }
-      }
+map.on('load', () => {
+  // Replace auto-generated thumbnails with local images and add tooltips
+  const imgs = basemapControl._container.querySelectorAll('img.basemap');
+  imgs.forEach(img => {
+    const meta = basemapThumbs[img.dataset.id];
+    if (meta) {
+      img.src = meta.img;
+      img.title = meta.label;
+      img.alt = meta.label;
     }
   });
+  // Observe for URL param tracking
+  const el = basemapControl._container;
+  if (el) basemapObserver.observe(el, { attributes: true, subtree: true });
+});
+
+// ============================================================
+// URL hash sync (zoom/lat/lng)
+// ============================================================
+function updateHash() {
+  const c = map.getCenter();
+  const z = map.getZoom().toFixed(1);
+  location.hash = `${z}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}`;
+}
+map.on('moveend', updateHash);
+
+// ============================================================
+// Esri REST layer discovery
+// ============================================================
+const LIST_REST = 'https://services.thelist.tas.gov.au/arcgis/rest/services/';
+
+async function discoverEsriLayers(baseURL, startFolder, label) {
+  const listEl = document.getElementById('layer-list');
+  listEl.innerHTML = '<div class="loading-layers"><i class="fa-solid fa-spinner fa-spin"></i> Loading layers…</div>';
+
+  try {
+    const catalogResp = await fetch(`${baseURL}${startFolder}?f=pjson`);
+    const catalog = await catalogResp.json();
+    const services = (catalog.services || []).filter(s => s.type === 'MapServer');
+
+    const layerPromises = services.map(async (service) => {
+      const serviceURL = `${baseURL}${service.name}/MapServer`;
+      try {
+        const resp = await fetch(`${serviceURL}?f=pjson`);
+        const data = await resp.json();
+        return (data.layers || []).map(lyr => ({
+          id: `${label}-${service.name}-${lyr.id}`,
+          group: service.name.replace(/^Public\//, ''),
+          title: lyr.name,
+          meta: lyr,
+          url: serviceURL,
+          type: 'esri',
+          added: false,
+          visible: false
+        }));
+      } catch (e) {
+        console.warn(`Failed to load ${serviceURL}`, e);
+        return [];
+      }
+    });
+
+    const results = await Promise.all(layerPromises);
+    const layers = results.flat();
+
+    // Sort by group then title
+    layers.sort((a, b) => {
+      const gc = a.group.localeCompare(b.group);
+      return gc !== 0 ? gc : a.title.localeCompare(b.title);
+    });
+
+    // Register and render
+    listEl.innerHTML = '';
+    let currentGroup = null;
+    for (const layer of layers) {
+      allLayers[layer.id] = layer;
+
+      if (layer.group !== currentGroup) {
+        currentGroup = layer.group;
+        const header = document.createElement('div');
+        header.className = 'layer-group-header';
+        header.textContent = currentGroup;
+        listEl.appendChild(header);
+      }
+
+      const div = document.createElement('div');
+      div.className = 'layer-item';
+      div.dataset.layerId = layer.id;
+      div.innerHTML = `<span class="layer-check"></span><span class="layer-name">${layer.title}</span>`;
+      div.addEventListener('click', () => toggleLayer(layer.id));
+      listEl.appendChild(div);
+    }
+
+    // Auto-add layers from URL
+    for (const id of initialLayers) {
+      if (allLayers[id]) toggleLayer(id);
+    }
+  } catch (e) {
+    listEl.innerHTML = '<div class="loading-layers">Failed to load layers.</div>';
+    console.error('Layer discovery failed', e);
+  }
 }
 
-function addLayerToList(layer) {
-  // layer is an object with unique id, group and title
-  $('#feature-list tbody').append('<tr class="feature-row searchable" id="' + layer.id + '">\
-		<td style="vertical-align: middle;">' + layer.title + '</td>\
-		<td style="vertical-align: middle;"><i class="fa fa-chevron-right pull-right"></i></td></tr>');
+// ============================================================
+// Add / remove overlay layers on the map
+// ============================================================
+function toggleLayer(layerId) {
+  const layer = allLayers[layerId];
+  if (!layer) return;
+
+  const idx = addedLayerIds.indexOf(layerId);
+  if (idx !== -1) {
+    // Remove
+    removeLayerFromMap(layerId);
+    addedLayerIds.splice(idx, 1);
+  } else {
+    // Add
+    addLayerToMap(layer);
+    addedLayerIds.push(layerId);
+  }
+  updateLayerListUI();
+  updateLayersParam();
 }
 
 function addLayerToMap(layer) {
-  if ($.inArray(layer.id, addedLayers) !== -1) {
-    return;
-  }
-  addedLayers.push(layer.id);
-  updateLayersParameter();
+  const srcId = `overlay-${layer.id}`;
+  const lyrId = `overlay-layer-${layer.id}`;
+
+  // ArcGIS MapServer export with {bbox-epsg-3857}
+  const tileUrl = `${layer.url}/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857` +
+    `&size=512,512&format=png32&transparent=true&layers=show:${layer.meta.id}&f=image`;
+
+  map.addSource(srcId, {
+    type: 'raster',
+    tiles: [tileUrl],
+    tileSize: 512
+  });
+  map.addLayer({ id: lyrId, type: 'raster', source: srcId });
+
   layer.added = true;
   layer.visible = true;
-
-  var createdLayer = null;
-
-  // TODO: Attribution
-  if (layer.type === 'esri') {
-    createdLayer = L.esri.dynamicMapLayer({
-      url: layer.url,
-      opacity: 1,
-      layers: [layer.meta.id],
-      id: layer.id
-    }).addTo(map);
-  } else if (layer.type = 'wms') {
-    var createdLayer = new L.TileLayer.WMS(layer.url, {
-      layers: layer.meta.name,
-      format: 'image/png',
-      transparent: true,
-      maxZoom: 20,
-      id: layer.id
-    }).addTo(map);
-  }
-
-  var shortTitle = layer.title;
-  if (shortTitle.length > 30) {
-    shortTitle = $.trim(shortTitle.substring(0, 25)) + '...' + $.trim(shortTitle.substr(shortTitle.length - 5));
-  }
-  overlays[shortTitle] = createdLayer;
-
-  map.removeControl(layerControl);
-  layerControl = L.control.layers(baseLayers, overlays, {
-    collapsed: isCollapsed
-  }).addTo(map);
 }
 
-map.on('click', function (e) {
-  // Hide the table
-  $('#data-detail').slideUp();
+function removeLayerFromMap(layerId) {
+  const lyrId = `overlay-layer-${layerId}`;
+  const srcId = `overlay-${layerId}`;
+  if (map.getLayer(lyrId)) map.removeLayer(lyrId);
+  if (map.getSource(srcId)) map.removeSource(srcId);
+  const layer = allLayers[layerId];
+  if (layer) { layer.added = false; layer.visible = false; }
+}
 
-  // Clear the interface
-  $('#data-tabs').empty();
-  var dataTabContents = $("#data-tab-contents");
-  var currentChildren = dataTabContents.children();
-  for (var i = currentChildren.length - 1; i >= 0; i--) {
-    currentChildren[i].remove();
+function updateLayerListUI() {
+  // Update checkmarks in main list
+  document.querySelectorAll('#layer-list .layer-item').forEach(el => {
+    const id = el.dataset.layerId;
+    const isActive = addedLayerIds.includes(id);
+    el.classList.toggle('active', isActive);
+    el.querySelector('.layer-check').innerHTML = isActive ? '<i class="fa-solid fa-check"></i>' : '';
+  });
+
+  // Rebuild pinned active layers section
+  const activeSection = document.getElementById('sidebar-active');
+  const activeList = document.getElementById('active-layer-list');
+  activeList.innerHTML = '';
+
+  if (addedLayerIds.length === 0) {
+    activeSection.classList.add('hidden');
+    return;
   }
 
-  // Clear the map
+  activeSection.classList.remove('hidden');
+  for (const id of addedLayerIds) {
+    const layer = allLayers[id];
+    if (!layer) continue;
+    const div = document.createElement('div');
+    div.className = 'layer-item active';
+    div.dataset.layerId = id;
+    div.innerHTML = `<span class="layer-check"><i class="fa-solid fa-check"></i></span><span class="layer-name">${layer.title}</span>`;
+    div.addEventListener('click', () => toggleLayer(id));
+    activeList.appendChild(div);
+  }
+}
+
+function updateLayersParam() {
+  const val = addedLayerIds.join(';');
+  setParam('layers', val || null);
+}
+
+// ============================================================
+// Click-to-identify (Esri REST)
+// ============================================================
+map.on('click', (e) => {
+  // Skip if clicking on existing highlighted features
+  const features = map.queryRenderedFeatures(e.point, { layers: ['selected-fills', 'selected-lines', 'selected-circles'].filter(id => map.getLayer(id)) });
+  
+  clearIdentifyResults();
   clearSelectedFeatures();
 
-  // Get the WMS and REST vector info
-  for (var i = addedLayers.length - 1; i >= 0; i--) {
-    var thisLayer = allLayers[addedLayers[i]];
-    if (!thisLayer.visible) {
-      continue;
-    }
-    if (thisLayer.type === 'wms') {
-      getFeatureWMS(thisLayer, e.latlng);
-    } else if (thisLayer.type === 'esri') {
-      getFeatureREST(thisLayer, e.latlng);
-    } else {
-      log("Failed to handle layer: " + layer.name, 1);
-    }
+  const activeLayers = addedLayerIds
+    .map(id => allLayers[id])
+    .filter(l => l && l.visible);
+
+  if (activeLayers.length === 0) return;
+
+  const { lng, lat } = e.lngLat;
+  const bounds = map.getBounds();
+  const canvas = map.getCanvas();
+  const mapExtent = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+  const imageDisplay = `${canvas.width},${canvas.height},96`;
+
+  for (const layer of activeLayers) {
+    identifyFeature(layer, lng, lat, mapExtent, imageDisplay);
   }
 });
+
+async function identifyFeature(layer, lng, lat, mapExtent, imageDisplay) {
+  const url = `${layer.url}/identify?` + new URLSearchParams({
+    geometry: `${lng},${lat}`,
+    geometryType: 'esriGeometryPoint',
+    sr: '4326',
+    layers: `visible:${layer.meta.id}`,
+    tolerance: '10',
+    mapExtent,
+    imageDisplay,
+    returnGeometry: 'true',
+    f: 'json'
+  });
+
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.results && data.results.length > 0) {
+      const geojsonFeatures = data.results.map(r => esriResultToGeoJSON(r));
+      handleIdentifyResults(layer, geojsonFeatures);
+    }
+  } catch (e) {
+    console.warn('Identify failed for', layer.title, e);
+  }
+}
+
+function esriResultToGeoJSON(result) {
+  const geom = result.geometry;
+  const props = { ...result.attributes };
+  const uuid = crypto.randomUUID ? crypto.randomUUID() : guid();
+  let geometry = null;
+
+  if (geom) {
+    if (geom.x !== undefined && geom.y !== undefined) {
+      geometry = { type: 'Point', coordinates: [geom.x, geom.y] };
+    } else if (geom.rings) {
+      geometry = { type: 'Polygon', coordinates: geom.rings };
+    } else if (geom.paths) {
+      geometry = {
+        type: geom.paths.length > 1 ? 'MultiLineString' : 'LineString',
+        coordinates: geom.paths.length > 1 ? geom.paths : geom.paths[0]
+      };
+    }
+  }
+
+  props._uuid = uuid;
+  return { type: 'Feature', geometry, properties: props, id: uuid, uuid };
+}
+
+function guid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// ============================================================
+// Display identify results
+// ============================================================
+function handleIdentifyResults(layer, features) {
+  if (!features.length) return;
+  features.forEach(f => { featureUUIDs[f.uuid] = f; });
+  addDataToTable(layer.title, layer.id, features);
+  addDataToMap(features);
+  document.getElementById('data-detail').classList.add('active');
+}
+
+function addDataToTable(title, layerId, features) {
+  const tabId = layerId.replace(/[^a-zA-Z0-9]/g, '');
+  const tabs = document.getElementById('data-tabs');
+  const contents = document.getElementById('data-tab-contents');
+
+  // Deactivate other tabs
+  tabs.querySelectorAll('li').forEach(li => li.classList.remove('active'));
+  contents.querySelectorAll('.data-pane').forEach(p => p.classList.remove('active'));
+
+  // Tab
+  const li = document.createElement('li');
+  li.className = 'active';
+  const a = document.createElement('a');
+  a.textContent = title;
+  a.href = '#';
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    tabs.querySelectorAll('li').forEach(t => t.classList.remove('active'));
+    contents.querySelectorAll('.data-pane').forEach(p => p.classList.remove('active'));
+    li.classList.add('active');
+    document.getElementById(`pane-${tabId}`).classList.add('active');
+  });
+  li.appendChild(a);
+  tabs.appendChild(li);
+
+  // Collect visible property names
+  const propNames = [];
+  if (features.length > 0) {
+    for (const name of Object.keys(features[0].properties)) {
+      if (!HIDDEN_PROPS.has(name)) propNames.push(name);
+    }
+  }
+
+  // Table
+  let html = '<table><thead><tr>';
+  for (const name of propNames) html += `<th>${name}</th>`;
+  html += '</tr></thead><tbody>';
+
+  for (const f of features) {
+    html += `<tr data-uuid="${f.uuid}">`;
+    for (const name of propNames) {
+      html += `<td>${linkify(f.properties[name])}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+
+  const pane = document.createElement('div');
+  pane.className = 'data-pane active';
+  pane.id = `pane-${tabId}`;
+  pane.innerHTML = html;
+  contents.appendChild(pane);
+
+  // Row interactions
+  pane.querySelectorAll('tr[data-uuid]').forEach(tr => {
+    tr.addEventListener('mouseenter', () => highlightFeatureByUUID(tr.dataset.uuid));
+    tr.addEventListener('mouseleave', () => unhighlightFeatureByUUID(tr.dataset.uuid));
+    tr.addEventListener('click', () => zoomToFeatureByUUID(tr.dataset.uuid));
+  });
+}
+
+function addDataToMap(features) {
+  const src = map.getSource('selected-features');
+  if (src) {
+    // Merge with existing
+    const existing = src._data || { type: 'FeatureCollection', features: [] };
+    existing.features.push(...features);
+    src.setData(existing);
+  } else {
+    const fc = { type: 'FeatureCollection', features };
+    map.addSource('selected-features', { type: 'geojson', data: fc });
+    map.getSource('selected-features')._data = fc;
+
+    // Polygon fills
+    map.addLayer({
+      id: 'selected-fills',
+      type: 'fill',
+      source: 'selected-features',
+      filter: ['==', '$type', 'Polygon'],
+      paint: { 'fill-color': '#FFD700', 'fill-opacity': 0.25 }
+    });
+    // Lines (polygons + linestrings)
+    map.addLayer({
+      id: 'selected-lines',
+      type: 'line',
+      source: 'selected-features',
+      filter: ['any', ['==', '$type', 'Polygon'], ['==', '$type', 'LineString']],
+      paint: { 'line-color': '#FFD700', 'line-width': 3 }
+    });
+    // Points
+    map.addLayer({
+      id: 'selected-circles',
+      type: 'circle',
+      source: 'selected-features',
+      filter: ['==', '$type', 'Point'],
+      paint: {
+        'circle-radius': 7,
+        'circle-color': '#FFD700',
+        'circle-stroke-color': '#000',
+        'circle-stroke-width': 2,
+        'circle-opacity': 0.7
+      }
+    });
+  }
+}
 
 function clearSelectedFeatures() {
-  for (var i = selectedFeatures.length - 1; i >= 0; i--) {
-    selectedFeatures[i].removeFrom(map);
+  for (const id of ['selected-fills', 'selected-lines', 'selected-circles']) {
+    if (map.getLayer(id)) map.removeLayer(id);
   }
-  selectedFeatures = [];
-  allSingleLayers = {};
-}
-
-function handleData(layer, data) {
-  if (data.features.length === 0) {
-    return;
+  for (const id of ['highlight-line', 'highlight-circle']) {
+    if (map.getLayer(id)) map.removeLayer(id);
   }
-  for (var i = data.features.length - 1; i >= 0; i--) {
-    data.features[i].uuid = guid();
-  }
-  addDataToTable(layer.title, layer.id, data.features);
-  addDataToMap(data);
-  $('#data-detail').slideDown();
+  if (map.getSource('selected-features')) map.removeSource('selected-features');
+  if (map.getSource('highlight-feature')) map.removeSource('highlight-feature');
+  Object.keys(featureUUIDs).forEach(k => delete featureUUIDs[k]);
+  hoveredUUID = null;
 }
 
-function getFeatureREST(layer, clickCoords) {
-  log("Getting REST info for: " + layer.title, 3);
-  log(layer.meta.id)
-  L.esri.identifyFeatures({
-    url: layer.url
-  }).on(map).at([clickCoords.lat, clickCoords.lng]).layers('visible:' + layer.meta.id).run(function (error, data, response) {
-    handleData(layer, data);
-  });
+function clearIdentifyResults() {
+  document.getElementById('data-tabs').innerHTML = '';
+  document.getElementById('data-tab-contents').innerHTML = '';
+  document.getElementById('data-detail').classList.remove('active');
 }
 
-function getFeatureWMS(layer, clickCoords) {
-  log("Getting info for layer: " + layer.title, 2);
-  var wms_gf_url = layer.url;
-  var bbox = clickCoords.lng - 0.0001 + "," + (clickCoords.lat - 0.0001) + "," + (clickCoords.lng + 0.0001) + "," + (clickCoords.lat + 0.0001) + ',EPSG:4326';
+// ============================================================
+// Map hover → highlight feature + table row
+// ============================================================
+let hoveredUUID = null;
+const SELECTABLE_LAYERS = ['selected-fills', 'selected-lines', 'selected-circles'];
 
-  var parameters = {
-    service: 'WFS',
-    version: '1.1.1',
-    request: 'GetFeature',
-    typeName: layer.meta.name,
-    maxFeatures: 100,
-    outputFormat: 'application/json',
-    SrsName: 'EPSG:4326',
-    bbox: bbox
-  };
-  $.ajax({
-    url: wms_gf_url + L.Util.getParamString(parameters),
-    dataType: 'json',
-    success: handleWMSJSON(layer)
-  });
-}
+map.on('mousemove', (e) => {
+  const layers = SELECTABLE_LAYERS.filter(id => map.getLayer(id));
+  if (!layers.length) return;
 
-// This is a weird closure function...
-function handleWMSJSON(layer) {
-  log("Handling JSON for layer: " + layer.title, 2);
-  return function (data) {
-    if (data.features.length > 0) {
-      handleData(layer, data);
-    }
-  };
-}
+  const features = map.queryRenderedFeatures(e.point, { layers });
+  const uuid = features.length ? features[0].properties._uuid : null;
 
-function addDataToTable(title, id, data) {
-  if (data.length === 0) {
-    return;
-  }
-  // Remove the bbox, nobody got time for dat
-  for (var i = data.length - 1; i >= 0; i--) {
-    delete data[i].properties["bbox"];
-    delete data[i].properties["SHAPE.LEN"];
-    delete data[i].properties["SHAPE"];
-    delete data[i].properties["SHAPE.AREA"];
-    delete data[i].properties["LIST_GUID"];
-  }
+  if (uuid === hoveredUUID) return;
 
-  var tableContent = '<div class="table"><table class="table table-condensed table-striped table-hover table-nonfluid data-table">';
-  tableContent += '<thead>';
-  tableContent += '<th style="display:none">uuid</th>';
-  for (var name in data[0].properties) {
-    tableContent += '<th>' + name + '</th>';
-  };
-  tableContent += '</thead>';
+  // Un-highlight previous
+  if (hoveredUUID) unhighlightFeatureByUUID(hoveredUUID);
 
-  for (var i = data.length - 1; i >= 0; i--) {
-    var oneRow = data[i];
-    tableContent += '<tr id=' + data[i].uuid + '>';
-    tableContent += '<td style="display:none">' + data[i].uuid + '</td>';
-    for (var name in oneRow.properties) {
-      tableContent += '<td>' + linkify(oneRow.properties[name]) + '</td>';
-    };
-    tableContent += '</tr>';
-  }
-  var thisId = id.replace('-', '').replace('/', '').replace('\\', '');
-  $('#data-tabs').append('<li><a data-toggle="tab" href="#' + thisId + '">' + title + '</a></li>');
-  $("#data-tab-contents").append('<div class="tab-pane fade in" id="' + thisId + '">' + tableContent + '</div>');
-  $('#data-tabs a[href="#' + thisId + '"]').trigger('click');
-}
-
-function addDataToMap(data) {
-  var selectedFeature = L.geoJson(data, {
-    style: function style(feature) {
-      return { color: 'yellow' };
-    },
-    onEachFeature: function onEachFeature(feature, layer) {
-      layer.on({
-        mouseover: highlightFeature,
-        mouseout: resetHighlight,
-        click: openTable()
-      });
-      allSingleLayers[feature.uuid] = layer;
-    },
-    pointToLayer: function pointToLayer(feature, latlng) {
-      var oneFeature = L.circleMarker(latlng, {
-        radius: 5,
-        fillColor: "yellow",
-        color: "#000",
-        weight: 5,
-        opacity: 0.6,
-        fillOpacity: 0.2
-      });
-      return oneFeature;
-    }
-  });
-  selectedFeature.addTo(map);
-  selectedFeatures.push(selectedFeature);
-}
-
-function openTable() {
-  $('#data-detail').slideDown();
-}
-
-function highlightLayer(layer) {
-  layer.setStyle({
-    fillColor: "yellow",
-    color: "yellow",
-    weight: 5,
-    opacity: 1
-  });
-}
-function resetLayer(layer) {
-  layer.setStyle({
-    radius: 5,
-    fillColor: "yellow",
-    color: "yellow",
-    weight: 5,
-    opacity: 0.6,
-    fillOpacity: 0.2
-  });
-}
-
-function highlightFeature(e) {
-  var layer = e.target;
-  highlightLayer(layer);
-  $("#" + layer.feature.uuid).addClass('info');
-  if (!L.Browser.ie && !L.Browser.opera) {
-    layer.bringToFront();
-  }
-}
-
-function resetHighlight(e) {
-  var layer = e.target;
-  resetLayer(layer);
-  $("#" + layer.feature.uuid).removeClass('info');
-}
-
-function log(message, level) {
-  if (debug && level < debugLevel) {
-    console.log(message);
-  }
-}
-function guid() {
-  function s4() {
-    return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-  }
-  return s4() + s4() + '-' + s4() + '-' + s4() + '-' + s4() + '-' + s4() + s4() + s4();
-}
-
-function updateLayersParameter() {
-  var layersString = "";
-  for (var i = addedLayers.length - 1; i >= 0; i--) {
-    var thisLayer = allLayers[addedLayers[i]];
-    if (thisLayer != null) {
-      layersString += thisLayer.id + ';';
-    }
-  }
-  layersString = layersString.substring(0, layersString.length - 1);
-  setParameter('layers', layersString);
-}
-
-//URL Parameter functions
-function getParameterByName(name, url) {
-  if (!url) url = window.location.href;
-  name = name.replace(/[\[\]]/g, "\\$&");
-  var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
-      results = regex.exec(url);
-  if (!results) return null;
-  if (!results[2]) return '';
-  return decodeURIComponent(results[2].replace(/\+/g, " "));
-}
-
-function setParameter(paramName, paramValue) {
-  var url = window.location.href;
-  var hash = location.hash;
-  url = url.replace(hash, '');
-  if (url.indexOf(paramName + "=") >= 0) {
-    var prefix = url.substring(0, url.indexOf(paramName));
-    var suffix = url.substring(url.indexOf(paramName));
-    suffix = suffix.substring(suffix.indexOf("=") + 1);
-    suffix = suffix.indexOf("&") >= 0 ? suffix.substring(suffix.indexOf("&")) : "";
-    url = prefix + paramName + "=" + paramValue + suffix;
+  // Highlight new
+  if (uuid) {
+    highlightFeatureByUUID(uuid);
+    map.getCanvas().style.cursor = 'pointer';
   } else {
-    if (url.indexOf("?") < 0) url += "?" + paramName + "=" + paramValue;else url += "&" + paramName + "=" + paramValue;
+    map.getCanvas().style.cursor = '';
   }
-  window.history.replaceState({}, "", url + hash);
-}
+  hoveredUUID = uuid;
+});
 
-function removeParameterByName(name, url) {
-  if (!url) url = window.location.href;
-  var hash = location.hash;
-  url = url.replace(hash, '');
-  var rtn = url.split('?')[0],
-      param,
-      params_arr = [],
-      queryString = url.indexOf('?') !== -1 ? url.split('?')[1] : '';
-  if (queryString !== '') {
-    params_arr = queryString.split('&');
-    for (var i = params_arr.length - 1; i >= 0; i -= 1) {
-      param = params_arr[i].split('=')[0];
-      if (param === name) {
-        params_arr.splice(i, 1);
-      }
-    }
-    rtn = rtn + '?' + params_arr.join('&');
-  }
-  window.history.replaceState({}, '', rtn + hash);
-}
+map.on('mouseleave', 'selected-fills', () => {
+  if (hoveredUUID) { unhighlightFeatureByUUID(hoveredUUID); hoveredUUID = null; }
+  map.getCanvas().style.cursor = '';
+});
+map.on('mouseleave', 'selected-lines', () => {
+  if (hoveredUUID) { unhighlightFeatureByUUID(hoveredUUID); hoveredUUID = null; }
+  map.getCanvas().style.cursor = '';
+});
+map.on('mouseleave', 'selected-circles', () => {
+  if (hoveredUUID) { unhighlightFeatureByUUID(hoveredUUID); hoveredUUID = null; }
+  map.getCanvas().style.cursor = '';
+});
 
-//from http://stackoverflow.com/questions/37684/how-to-replace-plain-urls-with-links
-function linkify(inputText) {
-  if (!inputText) {
-    return "Null";
-  }
-  try {
-    var replacedText, replacePattern1, replacePattern2, replacePattern3;
+// Feature highlighting from table
+function highlightFeatureByUUID(uuid) {
+  const f = featureUUIDs[uuid];
+  if (!f || !f.geometry) return;
 
-    //URLs starting with http://, https://, or ftp://
-    replacePattern1 = /(\b(https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim;
-    replacedText = inputText.replace(replacePattern1, '<a href="$1" target="_blank">$1</a>');
-
-    //URLs starting with "www." (without // before it, or it'd re-link the ones done above).
-    replacePattern2 = /(^|[^\/])(www\.[\S]+(\b|$))/gim;
-    replacedText = replacedText.replace(replacePattern2, '$1<a href="http://$2" target="_blank">$2</a>');
-
-    //Change email addresses to mailto:: links.
-    replacePattern3 = /(([a-zA-Z0-9\-\_\.])+@[a-zA-Z\_]+?(\.[a-zA-Z]{2,6})+)/gim;
-    replacedText = replacedText.replace(replacePattern3, '<a href="mailto:$1">$1</a>');
-
-    return replacedText;
-  } catch (TypeError) {
-    return inputText;
-  }
-}
-
-// Hash the location
-var hash = new L.Hash(map);
-
-//Google Places Autocomplete
-var input = document.getElementById('searchbox');
-var autocomplete = new google.maps.places.Autocomplete(input);
-autocomplete.addListener('place_changed', function () {
-  var place = autocomplete.getPlace();
-
-  // If the place has a geometry, then present it on a map.
-  if (place.geometry.viewport) {
-    var b = place.geometry.viewport.toJSON();
-    var southWest = L.latLng(b.south, b.west),
-        northEast = L.latLng(b.north, b.east),
-        bounds = L.latLngBounds(southWest, northEast);
-    map.fitBounds(bounds);
+  const src = map.getSource('highlight-feature');
+  const fc = { type: 'FeatureCollection', features: [f] };
+  if (src) {
+    src.setData(fc);
   } else {
-    //it's just a point, guess the zoom level.
-    var lng = place.geometry.location.lng(),
-        lat = place.geometry.location.lat();
-    map.setView([lat, lng], 12);
-  }
-});
-
-map.on('overlayadd', function (e) {
-  allLayers[e.layer.options.id].visible = true;
-});
-
-map.on('overlayremove', function (e) {
-  allLayers[e.layer.options.id].visible = false;
-});
-
-map.on('baselayerchange', function (e) {
-  if (e.name !== 'LIST Topographic') {
-    setParameter('baseLayer', e.name.replace(' ', '-'));
-  } else {
-    removeParameterByName('baseLayer');
-  }
-});
-
-/* Highlight search box text on click */
-$('#searchbox').click(function () {
-  $(this).select();
-});
-$('#filter').click(function () {
-  $(this).select();
-});
-
-/* Prevent hitting enter from refreshing the page */
-$('#searchbox').keypress(function (e) {
-  if (e.which == 13) {
-    e.preventDefault();
-  }
-});
-
-$('#featureModal').on('hidden.bs.modal', function (e) {
-  $(document).on('mouseout', '.feature-row', clearHighlight);
-});
-// Ok, got to get the searching working...
-$(document).ready(function () {
-  (function ($) {
-    $('#filter').keyup(function () {
-      var rex = new RegExp($(this).val(), 'i');
-      $('.searchable tr').hide();
-      $('.searchable tr').filter(function () {
-        return rex.test($(this).text());
-      }).show();
+    map.addSource('highlight-feature', { type: 'geojson', data: fc });
+    map.addLayer({
+      id: 'highlight-line', type: 'line', source: 'highlight-feature',
+      paint: { 'line-color': '#FF4500', 'line-width': 5 }
     });
-  })(jQuery);
+    map.addLayer({
+      id: 'highlight-circle', type: 'circle', source: 'highlight-feature',
+      filter: ['==', '$type', 'Point'],
+      paint: { 'circle-radius': 12, 'circle-color': '#FF4500', 'circle-opacity': 0.6 }
+    });
+  }
+
+  document.querySelector(`tr[data-uuid="${uuid}"]`)?.classList.add('highlighted');
+}
+
+function unhighlightFeatureByUUID(uuid) {
+  const src = map.getSource('highlight-feature');
+  if (src) src.setData({ type: 'FeatureCollection', features: [] });
+  document.querySelector(`tr[data-uuid="${uuid}"]`)?.classList.remove('highlighted');
+}
+
+function zoomToFeatureByUUID(uuid) {
+  const f = featureUUIDs[uuid];
+  if (!f || !f.geometry) return;
+  const bounds = new maplibregl.LngLatBounds();
+  
+  function addCoords(coords) {
+    if (typeof coords[0] === 'number') {
+      bounds.extend(coords);
+    } else {
+      coords.forEach(addCoords);
+    }
+  }
+
+  addCoords(f.geometry.coordinates);
+  if (!bounds.isEmpty()) {
+    map.fitBounds(bounds, { padding: 60, maxZoom: 17 });
+  }
+}
+
+// ============================================================
+// Linkify text values
+// ============================================================
+function linkify(val) {
+  if (val == null) return '';
+  const text = String(val);
+  return text
+    .replace(/(\b(https?|ftp):\/\/[-A-Z0-9+&@#/%?=~_|!:,.;]*[-A-Z0-9+&@#/%=~_|])/gim,
+      '<a href="$1" target="_blank">link</a>')
+    .replace(/(^|[^/])(www\.[\S]+(\b|$))/gim,
+      '$1<a href="http://$2" target="_blank">$2</a>');
+}
+
+// ============================================================
+// Search (Nominatim / OpenStreetMap)
+// ============================================================
+let searchTimeout = null;
+const searchBox = document.getElementById('searchbox');
+const searchResults = document.getElementById('search-results');
+
+searchBox.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  const q = searchBox.value.trim();
+  if (q.length < 3) { searchResults.classList.remove('active'); return; }
+  searchTimeout = setTimeout(() => searchNominatim(q), 350);
 });
-$('#searchclear').click(function () {
-  $('#filter').val('');
-  $('.searchable tr').show();
+
+searchBox.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') e.preventDefault();
 });
-//# sourceMappingURL=main.js.map
+
+searchBox.addEventListener('focus', () => searchBox.select());
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-container')) searchResults.classList.remove('active');
+});
+
+async function searchNominatim(query) {
+  const url = `https://nominatim.openstreetmap.org/search?` + new URLSearchParams({
+    format: 'json',
+    q: query,
+    viewbox: '143.5,-39.5,149,-44',
+    bounded: '0',
+    limit: '8',
+    countrycodes: 'au'
+  });
+
+  try {
+    const resp = await fetch(url, {
+      headers: { 'Accept': 'application/json' }
+    });
+    const results = await resp.json();
+    renderSearchResults(results);
+  } catch (e) {
+    console.warn('Search failed', e);
+  }
+}
+
+function renderSearchResults(results) {
+  searchResults.innerHTML = '';
+  if (!results.length) {
+    searchResults.classList.remove('active');
+    return;
+  }
+  searchResults.classList.add('active');
+  for (const r of results) {
+    const div = document.createElement('div');
+    div.className = 'search-result-item';
+    div.textContent = r.display_name;
+    div.addEventListener('click', () => {
+      if (r.boundingbox) {
+        const [s, n, w, e] = r.boundingbox.map(Number);
+        map.fitBounds([[w, s], [e, n]], { padding: 40 });
+      } else {
+        map.flyTo({ center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 14 });
+      }
+      searchBox.value = r.display_name;
+      searchResults.classList.remove('active');
+    });
+    searchResults.appendChild(div);
+  }
+}
+
+// ============================================================
+// Sidebar
+// ============================================================
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('hidden');
+  // Let MapLibre recalculate size
+  setTimeout(() => map.resize(), 350);
+}
+
+document.getElementById('sidebar-hide-btn').addEventListener('click', toggleSidebar);
+document.getElementById('sidebar-toggle-btn').addEventListener('click', toggleSidebar);
+document.getElementById('list-btn').addEventListener('click', toggleSidebar);
+
+// Start with sidebar hidden on mobile
+if (window.innerWidth <= 768) {
+  document.getElementById('sidebar').classList.add('hidden');
+}
+
+// Filter
+const filterInput = document.getElementById('filter');
+filterInput.addEventListener('input', () => {
+  const rex = new RegExp(filterInput.value, 'i');
+  document.querySelectorAll('.layer-item').forEach(el => {
+    el.style.display = rex.test(el.querySelector('.layer-name').textContent) ? '' : 'none';
+  });
+  // Hide empty group headers
+  document.querySelectorAll('.layer-group-header').forEach(header => {
+    let next = header.nextElementSibling;
+    let hasVisible = false;
+    while (next && !next.classList.contains('layer-group-header')) {
+      if (next.style.display !== 'none') hasVisible = true;
+      next = next.nextElementSibling;
+    }
+    header.style.display = hasVisible ? '' : 'none';
+  });
+});
+
+filterInput.addEventListener('focus', () => filterInput.select());
+
+document.getElementById('searchclear').addEventListener('click', () => {
+  filterInput.value = '';
+  filterInput.dispatchEvent(new Event('input'));
+});
+
+// ============================================================
+// Data panel buttons
+// ============================================================
+document.getElementById('data-detail-close-btn').addEventListener('click', () => {
+  document.getElementById('data-detail').classList.remove('active');
+});
+
+document.getElementById('data-detail-clear-btn').addEventListener('click', () => {
+  clearSelectedFeatures();
+  clearIdentifyResults();
+});
+
+// ============================================================
+// About modal
+// ============================================================
+document.getElementById('about-btn').addEventListener('click', () => {
+  document.getElementById('about-overlay').classList.remove('hidden');
+});
+document.getElementById('about-close').addEventListener('click', () => {
+  document.getElementById('about-overlay').classList.add('hidden');
+});
+document.getElementById('about-overlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    e.currentTarget.classList.add('hidden');
+  }
+});
+
+// ============================================================
+// Boot
+// ============================================================
+map.on('load', () => {
+  discoverEsriLayers(LIST_REST, 'Public', 'list');
+});
